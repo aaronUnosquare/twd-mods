@@ -1,0 +1,15 @@
+# Nunca versionar el juego ni su código extraído: este repo distribuye
+# solo el parche, no TWD.
+*.love
+*.love.orig
+twd_src/
+TWD.app/
+
+# La build de Linux es un AppImage: un solo archivo con el juego entero
+# dentro (intérprete, libs y twd.love). downloads/ es donde se deja para
+# desarrollar y probar el instalador; no entra en el repo.
+downloads/
+*.AppImage
+*.AppImage.orig
+
+.DS_Store
