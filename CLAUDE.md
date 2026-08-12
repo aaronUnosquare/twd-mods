@@ -138,9 +138,8 @@ Invariantes que hay que preservar al tocar el instalador:
 ## Estado
 
 `mod/lives.lua` (F8 suma 5 vidas, sin límite) es el único mod implementado; funciona en
-macOS y Linux. El README documenta un Mod B (vida infinita, envolver `Game:loseLives`) sin
-implementar, y la decisión deliberada de **no** tocar `src/online.lua`: los puntajes se
-siguen enviando al Supabase compartido.
+macOS y Linux. El README documenta la decisión deliberada de **no** tocar
+`src/online.lua`: los puntajes se siguen enviando al Supabase compartido.
 
 Sin probar: arrancar el juego en Linux y pulsar F8 (el contenedor no tiene OpenGL ni
 pantalla). Sin cubrir: Windows, donde la build de LÖVE va *fusionada* (el ZIP anexado al

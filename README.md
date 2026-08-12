@@ -4,6 +4,8 @@ Mods para **TWD — Tower Defense** (`com.tavo.twd`, LÖVE 2D 11.5), distribuido
 un *parche* que cada usuario aplica sobre su propia copia del juego. **macOS y
 Linux.**
 
+Ahora mismo hay uno: **F8 suma 5 vidas** durante la partida, sin límite de usos.
+
 > **Este repo no contiene el juego.** Se distribuye únicamente el instalador y el
 > archivo del mod. Cada usuario aplica el parche sobre su copia legítima del juego
 > (`TWD.app` en macOS, el AppImage en Linux). No subir aquí `twd.love`, su
@@ -11,7 +13,86 @@ Linux.**
 
 ---
 
-## 1. Análisis del objetivo
+## 1. Instalación
+
+**Requisitos.** En macOS, ninguno: `zip`, `unzip` y `codesign` vienen con el sistema.
+En Linux hacen falta `squashfs-tools` (para abrir y cerrar el AppImage) además de
+`zip`/`unzip`:
+
+```bash
+sudo apt install squashfs-tools zip unzip     # o dnf / pacman
+```
+
+**Instalar:**
+
+```bash
+git clone https://github.com/aaronUnosquare/twd-mods.git
+cd twd-mods
+./install.sh
+```
+
+Uso completo, igual en los dos sistemas:
+
+```bash
+./install.sh                       # busca el juego donde suele estar
+./install.sh /ruta/al/juego        # TWD.app en macOS, .AppImage en Linux
+./uninstall.sh                     # restaura el juego original
+```
+
+Sin argumento: en macOS `/Applications/TWD.app`; en Linux se busca
+`{Chibola,TWD}*.AppImage` en `~/Applications`, `~/.local/bin`, `~/bin`,
+`~/Downloads`, `~/Descargas`, `/opt` y `/usr/local/bin` (un AppImage no tiene ruta
+canónica, vive donde lo dejaste).
+
+**Reinstalar es seguro.** El instalador guarda una copia del juego original la primera
+vez y construye el parche siempre a partir de ella, así que volver a pasarlo no acumula
+capas: sirve para actualizar el mod. Y `./uninstall.sh` devuelve el juego byte a byte
+como estaba.
+
+**Ya en el juego:** en partida, **F8 suma 5 vidas**. No funciona en la pantalla final,
+con el selector de carta abierto, viendo una repetición ni en la partida de fondo del
+menú.
+
+---
+
+## 2. Advertencias
+
+- **Firma de código (macOS).** Modificar `Resources/` invalida `_CodeSignature` y
+  macOS se niega a abrir la app. La refirma ad-hoc lo resuelve. La app ya viene sin
+  notarizar (`spctl` la rechaza), así que los usuarios ya tuvieron que
+  autorizarla a mano una vez. En Linux no hay equivalente: el paso simplemente no
+  existe.
+- **`squashfs-tools` (Linux).** Hacen falta `unsquashfs` y `mksquashfs` para abrir y
+  cerrar el AppImage. El instalador lo comprueba y avisa con el nombre del paquete.
+  Nota menor: si la versión es anterior a la 4.4 no existen `-mkfs-time`/`-all-time`,
+  así que el instalador los omite; el AppImage sale igual de funcional, solo que no
+  reproducible byte a byte.
+- **Permisos.** `/Applications` puede requerir `sudo` según cómo se instaló la app.
+  En Linux, igual si el AppImage está en `/opt` o `/usr/local/bin`; el instalador
+  comprueba que se pueda escribir antes de tocar nada y sugiere copiarlo a `$HOME`.
+- **Windows sigue sin cubrir.** La build de Windows de LÖVE normalmente va
+  *fusionada* (el ZIP anexado al final del `.exe`), así que necesitaría una tercera
+  rama que extraiga y re-anexe el payload. Es un problema distinto al de Linux, donde
+  el `.love` va suelto dentro del AppImage y la cirugía resultó ser idéntica a la de
+  macOS. Sin decidir.
+- **Actualizaciones del juego.** El mod está donde el actualizador no llega
+  (`conf.lua` y `mods/` del paquete instalado), así que sigue vivo tras una
+  actualización. Lo que puede romperse es el *enganche*: si una versión futura renombra
+  `Game:keypressed` o `self.lives`, el mod deja de sumar. No revienta el juego —
+  el `require` va en `pcall` y el envoltorio delega en el original.
+- **Reinstalar el juego entero** (no una actualización interna, sino sustituir
+  `TWD.app` o bajar otro AppImage) sí borra el parche: hay que volver a pasar
+  `install.sh`. En Linux, además, el AppImage nuevo llega sin el `.orig` al lado.
+- **Leaderboard.** El mod **no** toca `src/online.lua`: los puntajes se siguen
+  enviando igual que sin él (ver §6).
+
+---
+
+De aquí en adelante, cómo funciona y por qué. No hace falta leerlo para usar el mod.
+
+---
+
+## 3. Análisis del objetivo
 
 TWD es un juego LÖVE 2D. El binario que lo lanza (`Contents/MacOS/love` en el
 bundle, `bin/love` dentro del AppImage) es el intérprete genérico de LÖVE y **no
@@ -91,7 +172,7 @@ Hallazgos que condicionan el diseño:
 
 ---
 
-## 2. Arquitectura del mod
+## 4. Arquitectura del mod
 
 Regla central: **no editar el código del juego.** Los mods son *monkey-patches*
 de Lua que envuelven un método en tiempo de ejecución, guardando la referencia
@@ -101,7 +182,7 @@ original y delegando en ella. Ventajas frente a editar líneas:
 - Es una pieza aislada; se desactiva borrando un archivo.
 - El diff contra el juego original es **una sola línea**.
 
-Dos piezas dentro del `.love` del bundle:
+Dos piezas dentro del `.love` del paquete instalado:
 
 1. **`mods/<nombre>.lua`** — el mod completo, se auto-aplica al cargarse.
 2. **Un cargador añadido al final de `conf.lua`** — la única modificación al
@@ -126,11 +207,11 @@ end
 Recorre `mods/` en vez de nombrar archivos, así que añadir un mod es soltar un
 `.lua`, y cada `require` va en `pcall`: un mod roto imprime el error y el juego
 arranca igual. La idempotencia sale gratis: el instalador reconstruye siempre
-desde `twd.love.orig`, nunca sobre lo ya parcheado.
+desde el backup del original, nunca sobre lo ya parcheado.
 
 ---
 
-## 3. Mod A — Vidas a demanda ✅ implementado
+## 5. Vidas a demanda ✅ implementado
 
 `mod/lives.lua`. **F8 suma 5 vidas, sin límite de usos.**
 
@@ -181,27 +262,7 @@ abierto, repetición, demo) no suman nada. El resto de teclas siguen llegando al
 
 ---
 
-## 4. Mod B — Vida infinita (no implementado)
-
-**Enganche:** envolver `Game:loseLives(amount, enemy)`. Es un cuello de botella
-perfecto: todo el daño al jugador pasa por ahí, y su único llamador es la fuga
-de enemigos. Dentro se resta la vida y se dispara `endGame("gameover")` si llega
-a 0.
-
-La versión envuelta **conserva los efectos cosméticos** (sonido, sacudida de
-pantalla, el conteo de `leakedBy` que alimenta el desglose de la pantalla de
-resultados) pero omite la resta y la comprobación de derrota.
-
-**Nota:** más invasivo que el Mod A, porque intercepta la ruta de daño y puede
-alterar de rebote las estadísticas de fugas. El Mod A solo suma y no toca esa
-ruta.
-
-Muy superior a poner un número gigante en `constants.lua`: eso se pierde en cada
-actualización y es un diff enorme.
-
----
-
-## 5. Leaderboard — se deja como está (decidido)
+## 6. Leaderboard — se deja como está (decidido)
 
 El análisis original proponía neutralizar `Online.submit` (el juego publica
 puntajes a un Supabase compartido) para no ensuciar la tabla de los demás.
@@ -221,32 +282,18 @@ que pasó.
 
 ---
 
-## 6. Instalador
+## 7. Cómo está montado el instalador
 
 ```
 twd-mods/
   install.sh             # aplica el mod (macOS y Linux)
   uninstall.sh           # restaura desde el backup
-  mod/lives.lua          # Mod A
+  mod/lives.lua          # el mod
   test/Dockerfile        # entorno Linux para probar el instalador
   test/linux-smoke.sh    # prueba de humo de la rama Linux
   README.md
+  CLAUDE.md
 ```
-
-Uso, igual en los dos sistemas:
-
-```bash
-./install.sh                       # busca el juego donde suele estar
-./install.sh /ruta/al/juego        # TWD.app en macOS, .AppImage en Linux
-./uninstall.sh
-```
-
-Sin argumento: en macOS `/Applications/TWD.app`; en Linux se busca
-`{Chibola,TWD}*.AppImage` en `~/Applications`, `~/.local/bin`, `~/bin`,
-`~/Downloads`, `~/Descargas`, `/opt` y `/usr/local/bin` (un AppImage no tiene ruta
-canónica, vive donde lo dejaste).
-
-### Cómo está montado
 
 El mod es el mismo en los dos sistemas, y el `.love` también: **lo único que cambia
 es el envoltorio.** De ahí la forma del script — localizar y desenvolver por sistema,
@@ -309,42 +356,9 @@ Lo que el contenedor no cubre es arrancar el juego, que necesita OpenGL y una pa
 
 ---
 
-## 7. Advertencias
-
-- **Firma de código (macOS).** Modificar `Resources/` invalida `_CodeSignature` y
-  macOS se niega a abrir la app. La refirma ad-hoc lo resuelve. La app ya viene sin
-  notarizar (`spctl` la rechaza), así que los usuarios ya tuvieron que
-  autorizarla a mano una vez. En Linux no hay equivalente: el paso simplemente no
-  existe.
-- **`squashfs-tools` (Linux).** Hacen falta `unsquashfs` y `mksquashfs` para abrir y
-  cerrar el AppImage (`apt install squashfs-tools`, o `dnf`/`pacman`). El instalador
-  lo comprueba y avisa con el nombre del paquete. Nota menor: si la versión es
-  anterior a la 4.4 no existen `-mkfs-time`/`-all-time`, así que el instalador los
-  omite; el AppImage sale igual de funcional, solo que no reproducible byte a byte.
-- **Permisos.** `/Applications` puede requerir `sudo` según cómo se instaló la app.
-  En Linux, igual si el AppImage está en `/opt` o `/usr/local/bin`; el instalador
-  comprueba que se pueda escribir antes de tocar nada y sugiere copiarlo a `$HOME`.
-- **Windows sigue sin cubrir.** La build de Windows de LÖVE normalmente va
-  *fusionada* (el ZIP anexado al final del `.exe`), así que necesitaría una tercera
-  rama que extraiga y re-anexe el payload. Es un problema distinto al de Linux, donde
-  el `.love` va suelto dentro del AppImage y la cirugía resultó ser idéntica a la de
-  macOS. Sin decidir.
-- **Actualizaciones del juego.** El mod está donde el actualizador no llega
-  (`conf.lua` y `mods/` del bundle), así que sigue vivo tras una actualización.
-  Lo que puede romperse es el *enganche*: si una versión futura renombra
-  `Game:keypressed` o `self.lives`, el mod deja de sumar. No revienta el juego —
-  el `require` va en `pcall` y el envoltorio delega en el original.
-- **Reinstalar el juego entero** (no una actualización interna, sino sustituir
-  `TWD.app` o bajar otro AppImage) sí borra el parche: hay que volver a pasar
-  `install.sh`. En Linux, además, el AppImage nuevo llega sin el `.orig` al lado.
-
----
-
 ## 8. Estado
 
 - [x] Análisis del objetivo y puntos de enganche
-- [x] Diseño de ambos mods
-- [x] Decidido: **Mod A** (Mod B queda documentado, sin implementar)
 - [x] Decidido: **+5 vidas por pulsación, sin límite de usos**
 - [x] Decidido: **no se toca el envío a Supabase** — se sigue enviando igual
 - [x] Implementar `mod/lives.lua`

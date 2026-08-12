@@ -1,4 +1,4 @@
--- Mod A — Vidas a demanda.
+-- Vidas a demanda.
 --
 -- Pulsar F8 durante la partida suma vidas. Sin límite de usos y sin tope de
 -- vidas: el juego no tiene MAX_LIVES ni recorta `lives` en ninguna parte, así
