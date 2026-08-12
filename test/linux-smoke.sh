@@ -94,8 +94,14 @@ LOVE="$(explode "$IMG" /tmp/patched)"
 if [ -n "$LOVE" ]; then
     ok "se extrae el AppDir y el .love (${LOVE#/tmp/patched/AppDir/})"
 
-    check "mods/lives.lua está y es idéntico al del repo" \
-        cmp -s /tmp/patched/love/mods/lives.lua "$REPO/mod/lives.lua"
+    # Un aserto por cada .lua de mod/, en vez de uno con el nombre escrito a
+    # mano: añadir un mod es soltar un archivo ahí, y esta prueba tiene que
+    # cubrirlo sin que haya que acordarse de volver aquí.
+    for src in "$REPO"/mod/*.lua; do
+        name=$(basename "$src")
+        check "mods/$name está y es idéntico al del repo" \
+            cmp -s "/tmp/patched/love/mods/$name" "$src"
+    done
 
     # Dos cargadores serían el síntoma de haber parcheado sobre lo ya
     # parcheado en vez de sobre el backup.

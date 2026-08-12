@@ -173,7 +173,7 @@ install_macos() {
             || echo "firma   → AVISO: codesign falló; puede que la app no abra"
     fi
 
-    printf '\nListo. En partida, F8 suma 5 vidas (sin límite de usos).\n'
+    printf '\nListo. En partida, F8 suma 5 vidas y F7 suma 5000 de oro (sin límite de usos).\n'
     printf 'Para revertir: ./uninstall.sh "%s"\n' "$app"
 }
 
@@ -279,7 +279,7 @@ install_linux() {
     # Aquí no hay nada que firmar: Linux no valida firmas del ejecutable, así
     # que el paso equivalente al codesign de macOS simplemente no existe.
 
-    printf '\nListo. En partida, F8 suma 5 vidas (sin límite de usos).\n'
+    printf '\nListo. En partida, F8 suma 5 vidas y F7 suma 5000 de oro (sin límite de usos).\n'
     printf 'Para revertir: ./uninstall.sh "%s"\n' "$img"
 }
 

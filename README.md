@@ -4,7 +4,8 @@ Mods para **TWD — Tower Defense** (`com.tavo.twd`, LÖVE 2D 11.5), distribuido
 un *parche* que cada usuario aplica sobre su propia copia del juego. **macOS y
 Linux.**
 
-Ahora mismo hay uno: **F8 suma 5 vidas** durante la partida, sin límite de usos.
+Ahora mismo hay dos, los dos sin límite de usos: **F8 suma 5 vidas** y **F7 suma 5000
+de oro** durante la partida.
 
 > **Este repo no contiene el juego.** Se distribuye únicamente el instalador y el
 > archivo del mod. Cada usuario aplica el parche sobre su copia legítima del juego
@@ -49,9 +50,9 @@ vez y construye el parche siempre a partir de ella, así que volver a pasarlo no
 capas: sirve para actualizar el mod. Y `./uninstall.sh` devuelve el juego byte a byte
 como estaba.
 
-**Ya en el juego:** en partida, **F8 suma 5 vidas**. No funciona en la pantalla final,
-con el selector de carta abierto, viendo una repetición ni en la partida de fondo del
-menú.
+**Ya en el juego:** en partida, **F8 suma 5 vidas** y **F7 suma 5000 de oro**. Ninguna
+de las dos funciona en la pantalla final, con el selector de carta abierto, viendo una
+repetición ni en la partida de fondo del menú.
 
 ---
 
@@ -78,8 +79,13 @@ menú.
 - **Actualizaciones del juego.** El mod está donde el actualizador no llega
   (`conf.lua` y `mods/` del paquete instalado), así que sigue vivo tras una
   actualización. Lo que puede romperse es el *enganche*: si una versión futura renombra
-  `Game:keypressed` o `self.lives`, el mod deja de sumar. No revienta el juego —
-  el `require` va en `pcall` y el envoltorio delega en el original.
+  `Game:keypressed`, `self.lives` o `self.money`, el mod correspondiente deja de sumar.
+  No revienta el juego — el `require` va en `pcall` y el envoltorio delega en el original.
+- **El oro sí deja rastro en el perfil.** Al *retirarse* de una partida, el juego
+  convierte el saldo sobrante en puntos de mejora permanentes (uno por cada 1000, con
+  tope de 50). Usar F7 y retirarse infla esa conversión. Es el único efecto de los mods
+  sobre el progreso persistente, y no hay forma de evitarlo sin tocar el código del
+  juego (ver §6). Las vidas no bancan nada.
 - **Reinstalar el juego entero** (no una actualización interna, sino sustituir
   `TWD.app` o bajar otro AppImage) sí borra el parche: hay que volver a pasar
   `install.sh`. En Linux, además, el AppImage nuevo llega sin el `.orig` al lado.
@@ -121,8 +127,10 @@ Archivos relevantes para estos mods:
 |---|---|
 | `conf.lua` | Configuración de ventana **y arranque del autoactualizador**. Se lee antes que nada |
 | `main.lua` | Punto de entrada. Despacha teclado con `scene:keypressed(key)` |
-| `src/game.lua` | Lógica principal. Contiene todos los puntos de enganche |
-| `src/constants.lua` | Balance: `START_LIVES`, dificultades, cartas |
+| `src/game.lua` | Lógica principal. Contiene todos los puntos de enganche. En el paquete actual ya solo reenvía a `src/game/init.lua` (ver abajo) |
+| `src/constants.lua` | Balance: `START_LIVES`, oro inicial por dificultad, cartas |
+| `src/effects.lua` | Partículas: `implode`, `ring`, `fountain`, `coin`, `text` |
+| `src/ui.lua` | HUD. `UI:punchNumber` anima los contadores; `UI.GOLD_X/Y` es el destino de las monedas |
 | `src/online.lua` | Leaderboard vía Supabase (`Online.submit`) |
 
 ### El juego se autoactualiza (esto manda sobre todo lo demás)
@@ -159,16 +167,40 @@ Además el paquete actualizado es bastante más grande que el de fábrica (reliq
 i18n, repeticiones, misiones…), así que los números de línea del bundle no valen:
 los enganches se verificaron contra el paquete que de verdad corre.
 
+Y el paquete se sigue moviendo: en el actual, **`src/game.lua` ya no es la partida**,
+es un `return require("src.game.init")` de una línea. El estado vive en
+`src/game/init.lua` y los ejes (`oleadas`, `construir`, `poderes`, `entrada`…) se
+fusionan sobre `Game` al final. El enganche no cambia —`require("src.game")` sigue
+devolviendo el `Game` ya fusionado— pero es un recordatorio de por qué los mods
+comprueban lo que van a usar antes de usarlo.
+
 Hallazgos que condicionan el diseño:
 
 - **No existe tope de vidas.** No hay `MAX_LIVES` ni ningún `math.min` sobre
   `lives` en todo el código. Sumar vidas es seguro sin lógica de recorte.
-- **El HUD y la música leen `self.lives` cada frame.** El número y la tensión
-  musical se actualizan solos; el mod no necesita tocar UI.
+- **Tampoco existe tope de oro.** No hay `MAX_MONEY`; el único `math.min` sobre
+  `self.money` en todo el código es el robo del Saqueador. El propio juego se
+  pone `demo.money = 999999` para la partida de fondo del menú.
+- **Saldo y estadística son dos cosas distintas.** `self.money` es el saldo;
+  `self.stats.gold` es el "oro ganado" del que viven la pantalla final, los
+  logros, las misiones y la telemetría. Los seis caminos del juego que dan oro
+  suman a los dos. **El mod suma solo al saldo, a propósito.**
+- **El HUD y la música leen `self.lives` y `g.money` cada frame.** `UI:punchNumber`
+  anima el contador solo cuando el número cambia, así que sumar basta: ningún mod
+  necesita tocar UI.
 - **Ya existen dos rutas que suman vidas:** `Game:takeBoon` (carta de vidas) y
   la reliquia "remache" en `Game:useRelic`, que además de sumar dispara
   `effects:implode` + `effects:ring` + `effects:text` y `Audio.play`. El mod
   copia ese gesto.
+- **Y seis que suman oro**, todas con el mismo patrón: matar un enemigo, botín
+  recuperado, limpiar oleada, renta de las Minas, adelantar oleada y la reliquia
+  "recambio". Las dos que dan oro *de la nada* —la reliquia "botín" y el cierre de
+  oleada— son las que el mod de oro copia.
+- **El saldo se trunca al guardar** (`math.floor` en `src/savegame.lua`), así que
+  los mods suman enteros.
+- **No hay anti-trampa de ningún tipo.** Ni checksum, ni firma, ni validación
+  sobre la partida guardada. Los únicos hashes del código son la verificación de
+  descarga del actualizador y las semillas deterministas de música y diaria.
 
 ---
 
@@ -231,6 +263,8 @@ retorna; si no, delega en el original.
 
 **Tecla:** de las F, el juego usa `f1` (saltar tutorial), `f3` (overlay de
 depuración), `f9` (playground) y `f11` (pantalla completa). **F8** está libre.
+`main.lua` intercepta las suyas *antes* de delegar en `scene:keypressed`, así que
+cualquier F que el juego no reclame llega intacta al mod.
 
 **Retroalimentación:** el gesto de la reliquia "remache", lo único del juego que
 devuelve vidas: `effects:implode` + `effects:ring` + `effects:text` con el texto
@@ -262,7 +296,83 @@ abierto, repetición, demo) no suman nada. El resto de teclas siguen llegando al
 
 ---
 
-## 6. Leaderboard — se deja como está (decidido)
+## 6. Oro a demanda ✅ implementado
+
+`mod/gold.lua`. **F7 suma 5000 de oro, sin límite de usos.**
+
+Es el mod de vidas con otro campo: misma estructura, mismo enganche, mismas
+guardas. Lo que sigue son solo las diferencias.
+
+**Enganche:** envolver `Game:keypressed`, igual que el de vidas. Los dos se
+encadenan sin conflicto — cada uno guarda el `original` que encontró y delega en
+él, así que el orden de carga (alfabético: `gold` antes que `lives`) da igual.
+Cada mod lleva su propio pestillo anti-doble-carga (`Game.__modGoldOnDemand`).
+
+**Operación:** `self.money = self.money + 5000`, y **nada más**. En particular
+**no toca `self.stats.gold`**, aunque los seis caminos del juego que dan oro sí lo
+hacen. Es deliberado: regalar saldo es el mod; hacer que la pantalla final, los
+logros y las misiones de "gana X oro" mientan sobre lo que se ganó jugando, no.
+Misma línea que el mod de vidas, que tampoco toca ninguna estadística.
+
+**Tecla:** **F7**. Con F8 ya ocupada por el mod de vidas, las F libres son F2, F4,
+F5, F6, F7, F10 y F12. Se eligió F7 por contigüidad con F8 — los dos mods quedan
+juntos bajo los dedos — y descartando F10 y F12, que algunos gestores de ventanas
+capturan antes de que lleguen al juego.
+
+**Retroalimentación:** el gesto de la reliquia "botín", lo único del juego donde
+aparece oro que no sale de un enemigo concreto: siete `effects:fountain` doradas
+brotando del borde inferior a lo ancho del tablero (suben en vez de caer, para que
+no se confundan con una entrada de enemigos), texto flotante en el centro y
+`Audio.play("coin_rain")`. Más las tres monedas volando al contador del cierre de
+oleada, vía `Game:rewardCoin` — se usa el ayudante y no `Effects:coin` a mano
+porque el destino sale de `UI.GOLD_X/Y`: si el HUD se mueve, las monedas también.
+
+**El texto lo compone el bioma.** No existe una clave i18n "+N ORO", y la divisa no
+siempre se llama Oro: el Pantano cobra en Cacao, y `Biome:money()` pasa además por
+`I18n.canon` (en inglés devuelve "Gold"). Así que el mod pregunta —
+`"+5000 " .. self.biome:money():upper()`— en vez de escribir la palabra, con
+`"+5000 ORO"` de reserva. Es el mismo truco que el juego usa al revés en «Sin %s»,
+que llama a `:lower()`.
+
+**Tolerancia a versiones:** lo que puede faltar se detecta antes de usarlo
+(`effects:fountain`, `Game:rewardCoin`, `self.biome`, `C.color.gold`), y
+`Audio.play` ya ignora en silencio los sonidos que no conoce, así que sobre un
+paquete viejo el mod suma igual y solo pierde adornos.
+
+**Sin autoguardado:** por la misma razón que el de vidas — solo es válido entre
+oleadas y F7 se puede pulsar en mitad de una.
+
+**Ajustes:** `M.KEY` y `M.GOLD`, en la cabecera de `mod/gold.lua`. `M.GOLD` debe
+ser entero: el saldo se guarda con `math.floor`.
+
+**Lo que sí se escapa al perfil.** Al *retirarse* de una partida, el juego convierte
+el saldo sobrante en puntos de mejora permanentes: uno por cada 1000, con tope de
+50. Regalar oro infla esa conversión, y no hay forma de evitarlo sin tocar el código
+del juego — el mod no sabe, al pulsar F7, si esa partida acabará retirándose. Es la
+única fuga de los dos mods hacia el progreso persistente y queda documentada, no
+resuelta: coherente con la decisión de §7 sobre el leaderboard.
+
+### Comprobado
+
+Instalación y desinstalación sobre una **copia** de `TWD.app`: los dos mods llegan
+intactos al `.love`, el cargador aparece una vez, la firma ad-hoc valida, el backup
+sigue siendo el original limpio y desinstalar devuelve el `.love` byte a byte. Y la
+prueba de humo de Linux en contenedor, 20/20.
+
+La lógica del mod se ejecutó además bajo LuaJIT contra dobles de los módulos del
+juego —sin OpenGL ni pantalla—: F7 suma exactamente 5000 y no toca `stats.gold`, el
+texto sale del bioma ("+5000 CACAO" en el Pantano, "+5000 ORO" de reserva), las
+cuatro guardas dejan caer la tecla al `keypressed` original, el resto del teclado
+sigue llegando, los dos mods conviven sin pisarse y el pestillo impide envolver dos
+veces.
+
+**Lo que no está comprobado:** pulsar F7 en el juego de verdad, con ventana. Los
+efectos (`fountain`, `rewardCoin`, `coin_rain`) se copiaron de rutas existentes del
+juego y se llaman con las mismas firmas, pero nadie los ha visto todavía en pantalla.
+
+---
+
+## 7. Leaderboard — se deja como está (decidido)
 
 El análisis original proponía neutralizar `Online.submit` (el juego publica
 puntajes a un Supabase compartido) para no ensuciar la tabla de los demás.
@@ -270,25 +380,27 @@ puntajes a un Supabase compartido) para no ensuciar la tabla de los demás.
 récords, misiones y logros se siguen enviando y guardando exactamente igual que
 sin el mod.
 
-Consecuencia asumida: una partida con F8 puede acabar en la tabla junto a las
+Consecuencia asumida: una partida con F8 o F7 puede acabar en la tabla junto a las
 demás. Si algún día se quiere lo contrario, es un archivo aparte en `mods/`
 (envolver `Online.submit` y salir sin enviar) — el cargador lo recogería solo,
 sin tocar nada más.
 
 Efecto de rebote que sí conviene saber: las repeticiones que graba el juego
-reproducen las acciones registradas, y las vidas del mod no son una acción
-registrada, así que una repetición de una partida con F8 no coincidirá con lo
-que pasó.
+reproducen las acciones registradas, y ni las vidas ni el oro del mod son una
+acción registrada. `src/replay.lua` compara al final `wave`, `lives`, `kills`,
+`leaked`, `money`, `towers` y `time`, así que una repetición de una partida con
+F8 o F7 avisará de que no coincide con lo que pasó. Es cosmético.
 
 ---
 
-## 7. Cómo está montado el instalador
+## 8. Cómo está montado el instalador
 
 ```
 twd-mods/
-  install.sh             # aplica el mod (macOS y Linux)
+  install.sh             # aplica los mods (macOS y Linux)
   uninstall.sh           # restaura desde el backup
-  mod/lives.lua          # el mod
+  mod/lives.lua          # F8: +5 vidas
+  mod/gold.lua           # F7: +5000 de oro
   test/Dockerfile        # entorno Linux para probar el instalador
   test/linux-smoke.sh    # prueba de humo de la rama Linux
   README.md
@@ -344,7 +456,7 @@ docker run --rm -v "$PWD:/work:ro" -v "$PWD/downloads:/dl:ro" \
 ```
 
 Deja el AppImage en `downloads/` (ignorado por git). La prueba trabaja sobre copias y
-comprueba 19 cosas: que el backup sea la descarga original byte a byte, que reinstalar
+comprueba 20 cosas: que el backup sea la descarga original byte a byte, que reinstalar
 dé el mismo AppImage byte a byte, que el cargador aparezca **exactamente una vez** en
 `conf.lua`, que todos los `.lua` compilen con LuaJIT, que el AppDir salga del
 ida-y-vuelta por squashfs con los mismos archivos y los mismos permisos (incluido el
@@ -356,18 +468,21 @@ Lo que el contenedor no cubre es arrancar el juego, que necesita OpenGL y una pa
 
 ---
 
-## 8. Estado
+## 9. Estado
 
 - [x] Análisis del objetivo y puntos de enganche
 - [x] Decidido: **+5 vidas por pulsación, sin límite de usos**
+- [x] Decidido: **+5000 de oro por pulsación (F7), sin límite y sin tocar `stats.gold`**
 - [x] Decidido: **no se toca el envío a Supabase** — se sigue enviando igual
 - [x] Implementar `mod/lives.lua`
+- [x] Implementar `mod/gold.lua` — el instalador no necesitó ningún cambio funcional:
+      el cargador recorre `mods/` y `patch_love` copia `mod/*.lua` por glob
 - [x] Implementar `install.sh` / `uninstall.sh`
 - [x] Probar instalación, arranque real del juego y desinstalación limpia (macOS)
 - [x] **Soporte Linux (AppImage)** — el mod no necesitó ningún cambio: solo el
-      envoltorio. Instalador y prueba de humo en contenedor, 19/19
-- [ ] Arrancar el juego en Linux y pulsar F8: **sin probar**. El contenedor no tiene
-      OpenGL ni pantalla. El Lua que corre es el mismo `.love` ya verificado en
+      envoltorio. Instalador y prueba de humo en contenedor, 20/20
+- [ ] Arrancar el juego en Linux y pulsar F8 o F7: **sin probar**. El contenedor no
+      tiene OpenGL ni pantalla. El Lua que corre es el mismo `.love` ya verificado en
       macOS, así que el riesgo es bajo, pero no está comprobado
 - [ ] Decidir: ¿soporte Windows? (sin hacer; requiere extraer y re-anexar el payload
       del `.exe` fusionado)
