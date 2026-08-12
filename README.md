@@ -4,8 +4,9 @@ Mods para **TWD — Tower Defense** (`com.tavo.twd`, LÖVE 2D 11.5), distribuido
 un *parche* que cada usuario aplica sobre su propia copia del juego. **macOS y
 Linux.**
 
-Ahora mismo hay dos, los dos sin límite de usos: **F8 suma 5 vidas** y **F7 suma 5000
-de oro** durante la partida.
+Ahora mismo hay tres: **F8 suma 5 vidas**, **F7 suma 5000 de oro** (los dos sin límite de
+usos) y **F6 enciende y apaga el modo letal**, en el que todas las torres matan de un
+disparo.
 
 > **Este repo no contiene el juego.** Se distribuye únicamente el instalador y el
 > archivo del mod. Cada usuario aplica el parche sobre su copia legítima del juego
@@ -50,9 +51,11 @@ vez y construye el parche siempre a partir de ella, así que volver a pasarlo no
 capas: sirve para actualizar el mod. Y `./uninstall.sh` devuelve el juego byte a byte
 como estaba.
 
-**Ya en el juego:** en partida, **F8 suma 5 vidas** y **F7 suma 5000 de oro**. Ninguna
-de las dos funciona en la pantalla final, con el selector de carta abierto, viendo una
-repetición ni en la partida de fondo del menú.
+**Ya en el juego:** en partida, **F8 suma 5 vidas**, **F7 suma 5000 de oro** y **F6
+enciende o apaga el modo letal** (todas las torres matan de un disparo; se ve un
+recuadro «MODO LETAL» arriba mientras esté activo, y arranca apagado en cada partida).
+Ninguna de las tres funciona en la pantalla final, con el selector de carta abierto,
+viendo una repetición ni en la partida de fondo del menú.
 
 ---
 
@@ -79,18 +82,32 @@ repetición ni en la partida de fondo del menú.
 - **Actualizaciones del juego.** El mod está donde el actualizador no llega
   (`conf.lua` y `mods/` del paquete instalado), así que sigue vivo tras una
   actualización. Lo que puede romperse es el *enganche*: si una versión futura renombra
-  `Game:keypressed`, `self.lives` o `self.money`, el mod correspondiente deja de sumar.
-  No revienta el juego — el `require` va en `pcall` y el envoltorio delega en el original.
+  `Game:keypressed`, `self.lives`, `self.money` o `Projectile:damage_`, el mod
+  correspondiente deja de hacer efecto. No revienta el juego — el `require` va en `pcall`
+  y el envoltorio delega en el original.
+- **El modo letal cambia el juego, no solo lo facilita.** Mientras está encendido: los
+  jefes ya no invocan ni entran en furia (esos umbrales solo se comprueban si el enemigo
+  sobrevive al golpe), el daño en área mata todo el radio de golpe en vez de solo al
+  objetivo, y el veneno nunca llega a aplicarse porque el enemigo muere en el impacto.
+  Son consecuencias de matar de un disparo, no fallos.
+- **Las repeticiones salen desfasadas.** Vale para los tres mods: el juego graba las
+  *acciones* del jugador, y pulsar F6/F7/F8 no es una acción registrada. Al reproducir
+  una partida jugada con mods, el propio juego avisa en la pantalla final
+  («oleada: 40 en la partida, 12 aquí»). Es cosmético, no rompe nada.
 - **El oro sí deja rastro en el perfil.** Al *retirarse* de una partida, el juego
   convierte el saldo sobrante en puntos de mejora permanentes (uno por cada 1000, con
-  tope de 50). Usar F7 y retirarse infla esa conversión. Es el único efecto de los mods
-  sobre el progreso persistente, y no hay forma de evitarlo sin tocar el código del
-  juego (ver §6). Las vidas no bancan nada.
+  tope de 50). Usar F7 y retirarse infla esa conversión. No hay forma de evitarlo sin
+  tocar el código del juego (ver §6). Las vidas no bancan nada, y el modo letal tampoco:
+  entrega a cada enemigo exactamente la vida que le queda, ni un punto más, para que las
+  estadísticas de daño del perfil sigan siendo ciertas (ver §7).
 - **Reinstalar el juego entero** (no una actualización interna, sino sustituir
   `TWD.app` o bajar otro AppImage) sí borra el parche: hay que volver a pasar
   `install.sh`. En Linux, además, el AppImage nuevo llega sin el `.orig` al lado.
-- **Leaderboard.** El mod **no** toca `src/online.lua`: los puntajes se siguen
-  enviando igual que sin él (ver §6).
+- **Leaderboard.** Los mods **no** tocan `src/online.lua`: los puntajes se siguen
+  enviando igual que sin ellos (ver §8). Con el modo letal esa decisión pesa más que con
+  los otros dos, y conviene decirlo sin rodeos: el validador del servidor no comprueba
+  nada relacionado, así que una partida con F6 encendida entra en el tablón compartido
+  junto a las de todo el mundo.
 
 ---
 
@@ -131,6 +148,9 @@ Archivos relevantes para estos mods:
 | `src/constants.lua` | Balance: `START_LIVES`, oro inicial por dificultad, cartas |
 | `src/effects.lua` | Partículas: `implode`, `ring`, `fountain`, `coin`, `text` |
 | `src/ui.lua` | HUD. `UI:punchNumber` anima los contadores; `UI.GOLD_X/Y` es el destino de las monedas |
+| `src/projectile.lua` | `Projectile:damage_` — por donde pasa **todo** el daño de torres |
+| `src/enemy.lua` | `Enemy:hit` (armadura, grieta, mínimo del 20%) y los umbrales de jefe |
+| `src/gameview.lua` | Dibujo de la partida. Se fusiona sobre `Game`, así que sus métodos se envuelven igual |
 | `src/online.lua` | Leaderboard vía Supabase (`Online.submit`) |
 
 ### El juego se autoactualiza (esto manda sobre todo lo demás)
@@ -201,6 +221,19 @@ Hallazgos que condicionan el diseño:
 - **No hay anti-trampa de ningún tipo.** Ni checksum, ni firma, ni validación
   sobre la partida guardada. Los únicos hashes del código son la verificación de
   descarga del actualizador y las semillas deterministas de música y diaria.
+- **Todo el daño de torres pasa por `Projectile:damage_`.** Los cuatro caminos
+  —impacto directo, área con caída, perforación y cadena de la Tesla— desembocan
+  ahí y en ningún otro sitio. Las torres que no disparan (Faro, Mina de oro) no
+  pasan por ahí, y las auras que mojan tampoco. Es un embudo perfecto para "todas
+  las torres, y solo las torres".
+- **`Enemy:hit` NO es ese embudo**, aunque lo parezca: por ahí pasan también los
+  poderes, y la Ventisca lo llama con daño 0 para congelar sin dañar. Enganchar
+  ahí convertiría "congelar" en un botón de ganar.
+- **`Enemy:hit` devuelve el daño BRUTO, no la vida que quitó**, y ese número se
+  acumula en `owner.damageTotal`, que acaba en la partida guardada, en el **perfil
+  permanente** y en Supabase. Es la trampa más fácil de pisar de todo el juego:
+  un mod que dispare "daño infinito" corrompe las estadísticas de daño para
+  siempre, entre partidas.
 
 ---
 
@@ -372,28 +405,137 @@ juego y se llaman con las mismas firmas, pero nadie los ha visto todavía en pan
 
 ---
 
-## 7. Leaderboard — se deja como está (decidido)
+## 7. Modo letal ✅ implementado
 
-El análisis original proponía neutralizar `Online.submit` (el juego publica
-puntajes a un Supabase compartido) para no ensuciar la tabla de los demás.
-**Descartado a propósito: el mod no toca `src/online.lua`.** Los puntajes,
-récords, misiones y logros se siguen enviando y guardando exactamente igual que
-sin el mod.
+`mod/lethal.lua`. **F6 enciende y apaga: todas las torres matan de un disparo.**
 
-Consecuencia asumida: una partida con F8 o F7 puede acabar en la tabla junto a las
-demás. Si algún día se quiere lo contrario, es un archivo aparte en `mods/`
-(envolver `Online.submit` y salir sin enviar) — el cargador lo recogería solo,
-sin tocar nada más.
+Los otros dos mods son un efecto puntual; este es un **estado**. De ahí las tres
+diferencias: es un interruptor, se ve en pantalla mientras dure, y arranca apagado
+en cada partida.
 
-Efecto de rebote que sí conviene saber: las repeticiones que graba el juego
-reproducen las acciones registradas, y ni las vidas ni el oro del mod son una
-acción registrada. `src/replay.lua` compara al final `wave`, `lives`, `kills`,
-`leaked`, `money`, `towers` y `time`, así que una repetición de una partida con
-F8 o F7 avisará de que no coincide con lo que pasó. Es cosmético.
+**Enganche: `Projectile:damage_`**, el embudo exacto de "todas las torres y solo
+las torres". Los cuatro caminos de daño de torre pasan por ahí; los poderes y el
+veneno, no. Se descartó `Enemy:hit`, que sería lo obvio, porque la Ventisca lo
+llama con daño 0 para congelar: enganchar ahí convertiría congelar en un botón de
+ganar la partida.
+
+### El cálculo del daño, que es lo que hace que esto no sea una línea
+
+`Enemy:hit` devuelve el daño **bruto** aplicado, no la vida que quitó, y `damage_`
+lo suma a `owner.damageTotal`. Ese número acaba en la partida guardada
+(`bd_dmgBy`), en el **perfil permanente** (`st_dmg`, `std_<torre>`) y en el
+Supabase compartido (`runs.dmg_by`). Un mod que disparase "daño infinito"
+corrompería las estadísticas de daño **para siempre y entre partidas** — bastante
+peor que cualquier efecto de los otros dos.
+
+Así que el mod no infla nada: calcula el daño **mínimo que mata exactamente**. En
+`Enemy:hit`, con `d = amount · mul · (1 + crack)`:
+
+```
+armor = max(0, effectiveArmor() - pierce)
+real  = max(d · 0.2, d - armor)        -- siempre pasa un mínimo del 20%
+```
+
+Buscando `real == hp` clavado y resolviendo las dos ramas:
+
+- si `armor <= 4·hp` → `d = hp + armor` (cae en la rama `d - armor`)
+- si `armor > 4·hp` → `d = 5·hp` (cae en la rama del 20%)
+
+Las dos dan `real == hp` exacto, y coinciden en `armor == 4·hp`. De ahí se despeja
+el `amount` a entregar deshaciendo el multiplicador del disparo (combo, Demoledor,
+Verdugo de jefes — se le pregunta al propio `Projectile:damageMul` en vez de
+replicarlo) y la grieta del enemigo. Un epsilon de 1e-9 absorbe el redondeo del ida
+y vuelta en coma flotante; sin él, un `real` una ulp por debajo dejaría al enemigo
+vivo con `hp = 1e-13`.
+
+Resultado: el enemigo muere de un golpe **y** `dmgBy` sigue diciendo la verdad —
+"esta torre hizo tanto daño como vida tenían los enemigos que mató". Es la misma
+línea que sigue el mod de oro al no tocar `stats.gold`.
+
+**Guardas:** las cuatro de siempre sobre F6, más dos en el daño — no se toca a un
+enemigo ya muerto, ni un golpe que no daña (`amount <= 0`). Esa segunda importa:
+convertir en letal un impacto que no hacía daño sería cambiar lo que hace el juego,
+no potenciarlo.
+
+**Tecla:** **F6**. Barrido de `"f6"` por los 222 archivos del paquete: cero
+apariciones. Con F7 y F8 tomadas, quedan libres F2, F4, F5, F10 y F12.
+
+**Indicador:** un recuadro «MODO LETAL» arriba y centrado sobre el tablero mientras
+esté activo, copiando la píldora del Botín (`GameView:drawRelics`), que es
+justamente el hueco que el juego reserva para «esto es lo que está pasando ahora
+mismo». **Baja a `y=40` si el Botín está activo**, para no pisarlo. Y un banner de
+1,1 s al encender y al apagar, con `Audio.play("overdrive")` / `"deny"`:
+`overdrive` es el sonido del poder que acelera a todas las torres, o sea, lo que el
+juego ya usa para decir «modificador global encendido».
+
+`GameView` se fusiona sobre `Game`, así que `Game.drawRelics` es un método normal y
+se envuelve como los demás. El dibujo va en `pcall`: un fallo pintando no puede
+tumbar el frame.
+
+**El interruptor vive en el módulo, no en la partida**, porque el proyectil no
+tiene ninguna referencia al juego (`Projectile.new` solo guarda la torre que
+disparó). Como solo corre una partida a la vez, un booleano basta. Envolver
+`Game.new` —el único sitio donde nace una partida, incluidas la demo del menú y las
+repeticiones— lo apaga al empezar, que es lo que evita tener que guardarlo: el
+guardado no tiene campo para esto, y apagado es el estado seguro.
+
+**Textos literales, sin i18n.** No hay ninguna clave del juego que sirva, y
+`I18n.T` de una clave inexistente **imprime la clave** en el tablero. Mejor una
+cadena en español que un `juego.modo_letal` en pantalla.
+
+**Ajustes:** `M.KEY` y los tres textos, en la cabecera de `mod/lethal.lua`.
+
+**Lo que cambia del juego mientras está encendido**, y son consecuencias de matar
+de un disparo, no fallos: los jefes ya no invocan ni entran en furia (esos umbrales
+solo se comprueban si el enemigo sobrevive), el daño en área mata todo el radio de
+golpe, y el veneno nunca llega a aplicarse. Y los logros de alcance —150 oleadas en
+infinito pesadilla, 150 000 bajas— dejan de significar nada. Ninguna misión ni logro
+mide daño, así que por ahí no se rompe nada.
+
+### Comprobado
+
+La lógica ejecutada bajo LuaJIT contra dobles del juego, con `Enemy:hit` y
+`Projectile:damage_` copiados **literalmente** del código real para que un error al
+deshacer la armadura o la grieta se vea: **16 casos** (sin armadura, vida
+fraccionaria, 1 punto de vida, armadura baja, armadura justo en `4·hp`, armadura
+enorme, acorazado, grieta, grieta + armadura, armadura corroída, perforación,
+perforación mayor que la armadura, combo, Demoledor, Verdugo de jefes, y todo a la
+vez) y en todos el enemigo muere de un disparo con `damageTotal` igual a su vida
+exacta. Más: con el interruptor apagado el daño es idéntico al del juego sin mod,
+el mod no toca a un enemigo muerto ni un golpe de daño 0, las cuatro guardas dejan
+caer F6 al `keypressed` original, `Game.new` deja el interruptor apagado, la
+píldora se pinta y se aparta del Botín, y los tres mods conviven.
+
+**Lo que no está comprobado:** verlo en el juego con ventana.
 
 ---
 
-## 8. Cómo está montado el instalador
+## 8. Leaderboard — se deja como está (decidido)
+
+El análisis original proponía neutralizar `Online.submit` (el juego publica
+puntajes a un Supabase compartido) para no ensuciar la tabla de los demás.
+**Descartado a propósito: ningún mod toca `src/online.lua`.** Los puntajes,
+récords, misiones y logros se siguen enviando y guardando exactamente igual que
+sin ellos.
+
+Consecuencia asumida: una partida con F8, F7 o F6 puede acabar en la tabla junto a
+las demás. Con el modo letal eso pesa más que con los otros dos —F7 y F8 aceleran
+una partida, F6 la convierte en un paseo— y el validador del servidor no comprueba
+nada relacionado, así que pasa el filtro sin problema. **Se mantiene la decisión de
+no tocar el envío, pero conviene saber exactamente lo que implica.** Si algún día se
+quiere lo contrario, es un archivo aparte en `mods/` (marcar la partida al encender
+el modo y envolver `Online.submit` para salir sin enviar) — el cargador lo recogería
+solo, sin tocar nada más.
+
+Efecto de rebote que sí conviene saber: las repeticiones que graba el juego
+reproducen las acciones registradas, y ninguna de las tres teclas de los mods es una
+acción registrada. `src/replay.lua` compara al final `wave`, `lives`, `kills`,
+`leaked`, `money`, `towers` y `time`, así que una repetición de una partida jugada
+con mods avisará de que no coincide con lo que pasó. Es cosmético.
+
+---
+
+## 9. Cómo está montado el instalador
 
 ```
 twd-mods/
@@ -401,6 +543,7 @@ twd-mods/
   uninstall.sh           # restaura desde el backup
   mod/lives.lua          # F8: +5 vidas
   mod/gold.lua           # F7: +5000 de oro
+  mod/lethal.lua         # F6: interruptor de modo letal
   test/Dockerfile        # entorno Linux para probar el instalador
   test/linux-smoke.sh    # prueba de humo de la rama Linux
   README.md
@@ -456,7 +599,7 @@ docker run --rm -v "$PWD:/work:ro" -v "$PWD/downloads:/dl:ro" \
 ```
 
 Deja el AppImage en `downloads/` (ignorado por git). La prueba trabaja sobre copias y
-comprueba 20 cosas: que el backup sea la descarga original byte a byte, que reinstalar
+comprueba 21 cosas: que el backup sea la descarga original byte a byte, que reinstalar
 dé el mismo AppImage byte a byte, que el cargador aparezca **exactamente una vez** en
 `conf.lua`, que todos los `.lua` compilen con LuaJIT, que el AppDir salga del
 ida-y-vuelta por squashfs con los mismos archivos y los mismos permisos (incluido el
@@ -468,20 +611,28 @@ Lo que el contenedor no cubre es arrancar el juego, que necesita OpenGL y una pa
 
 ---
 
-## 9. Estado
+## 10. Estado
 
 - [x] Análisis del objetivo y puntos de enganche
 - [x] Decidido: **+5 vidas por pulsación, sin límite de usos**
 - [x] Decidido: **+5000 de oro por pulsación (F7), sin límite y sin tocar `stats.gold`**
-- [x] Decidido: **no se toca el envío a Supabase** — se sigue enviando igual
+- [x] Decidido: **modo letal como interruptor (F6)**, con indicador en pantalla y
+      arrancando apagado en cada partida
+- [x] Decidido: **no se toca el envío a Supabase** — se sigue enviando igual, también
+      con el modo letal
 - [x] Implementar `mod/lives.lua`
 - [x] Implementar `mod/gold.lua` — el instalador no necesitó ningún cambio funcional:
       el cargador recorre `mods/` y `patch_love` copia `mod/*.lua` por glob
+- [x] Implementar `mod/lethal.lua` — ni el instalador ni la prueba de humo necesitaron
+      cambios: el test ya recorre `mod/*.lua`
 - [x] Implementar `install.sh` / `uninstall.sh`
 - [x] Probar instalación, arranque real del juego y desinstalación limpia (macOS)
-- [x] **Soporte Linux (AppImage)** — el mod no necesitó ningún cambio: solo el
-      envoltorio. Instalador y prueba de humo en contenedor, 20/20
-- [ ] Arrancar el juego en Linux y pulsar F8 o F7: **sin probar**. El contenedor no
+- [x] **Soporte Linux (AppImage)** — los mods no necesitaron ningún cambio: solo el
+      envoltorio. Instalador y prueba de humo en contenedor, 21/21
+- [ ] Ver el modo letal en el juego con ventana: **sin probar**. El cálculo del daño
+      está verificado con 16 casos bajo LuaJIT, pero la píldora y los efectos no los ha
+      visto nadie en pantalla
+- [ ] Arrancar el juego en Linux y pulsar las teclas: **sin probar**. El contenedor no
       tiene OpenGL ni pantalla. El Lua que corre es el mismo `.love` ya verificado en
       macOS, así que el riesgo es bajo, pero no está comprobado
 - [ ] Decidir: ¿soporte Windows? (sin hacer; requiere extraer y re-anexar el payload

@@ -24,7 +24,7 @@ No hay build, ni lint, ni framework de tests: son tres scripts de bash y un arch
 
 bash -n install.sh              # lo único parecido a un lint
 
-# Prueba de humo de la rama Linux — 20 asertos, no necesita VM ni emular x86_64
+# Prueba de humo de la rama Linux — 21 asertos, no necesita VM ni emular x86_64
 docker build -t twd-mods-test test/
 docker run --rm -v "$PWD:/work:ro" -v "$PWD/downloads:/dl:ro" \
     twd-mods-test bash /work/test/linux-smoke.sh
@@ -132,6 +132,15 @@ Invariantes que hay que preservar al tocar el instalador:
   nombre de comando. Para eso está `check_not`.
 - **`mod/*.lua` se copia entero a `mods/`**, así que cualquier `.lua` que se deje en
   `mod/` se cargará como mod. No pongas ahí helpers.
+- **`Enemy:hit` devuelve el daño BRUTO, no la vida que quitó**, y `Projectile:damage_` lo
+  acumula en `owner.damageTotal`. Ese número acaba en la partida guardada (`bd_dmgBy`),
+  en el **perfil permanente** (`st_dmg`, `std_<torre>`) y en el Supabase compartido
+  (`runs.dmg_by`). Un mod que dispare "daño infinito" corrompe las estadísticas de daño
+  para siempre y entre partidas. `mod/lethal.lua` calcula el daño mínimo que mata exacto
+  justo por esto; no lo "simplifiques" a un número gigante.
+- **Para tocar el daño de torres, el embudo es `Projectile:damage_`**, no `Enemy:hit`:
+  por `hit` pasan también los poderes, y la Ventisca lo llama con daño 0 solo para
+  congelar. Enganchar ahí convierte congelar en un botón de ganar.
 - **`src/game.lua` ya no es la partida.** En el paquete actual es un
   `return require("src.game.init")` de una línea: el estado vive en `src/game/init.lua`
   y los ejes (`oleadas`, `construir`, `poderes`, `entrada`…) se fusionan sobre `Game` al
@@ -142,37 +151,40 @@ Invariantes que hay que preservar al tocar el instalador:
 
 ## Estado
 
-Dos mods implementados, los dos funcionando en macOS y Linux:
+Tres mods implementados, todos funcionando en macOS y Linux:
 
-| Archivo | Tecla | Qué hace |
-|---|---|---|
-| `mod/lives.lua` | F8 | `self.lives += 5` |
-| `mod/gold.lua` | F7 | `self.money += 5000` |
+| Archivo | Tecla | Qué hace | Enganches |
+|---|---|---|---|
+| `mod/lives.lua` | F8 | `self.lives += 5` | `Game.keypressed` |
+| `mod/gold.lua` | F7 | `self.money += 5000` | `Game.keypressed` |
+| `mod/lethal.lua` | F6 | interruptor: las torres matan de un disparo | `Projectile.damage_`, `Game.keypressed`, `Game.drawRelics`, `Game.new` |
 
-Los dos envuelven `Game:keypressed` con las mismas cuatro guardas y se encadenan sin
+Todos envuelven `Game:keypressed` con las mismas cuatro guardas y se encadenan sin
 conflicto (cada uno guarda el `original` que encontró; el orden de carga es alfabético y
 da igual). Cada uno lleva su propio pestillo anti-doble-carga: `Game.__modLivesOnDemand`,
-`Game.__modGoldOnDemand`.
+`Game.__modGoldOnDemand`, `Game.__modLethalMode`.
 
-**Añadir un tercer mod no requiere tocar el instalador**: `append_loader` recorre `mods/`
-y `patch_love` copia `mod/*.lua` por glob. Solo hay que actualizar los dos `printf` de
-"Listo" —están **duplicados** en la rama macOS y en la de Linux— y la documentación.
+**Añadir un cuarto mod no requiere tocar el instalador ni el test**: `append_loader`
+recorre `mods/`, `patch_love` copia `mod/*.lua` por glob y `linux-smoke.sh` itera sobre
+`mod/*.lua`. Solo hay que actualizar los dos `printf` de "Listo" —están **duplicados** en
+la rama macOS y en la de Linux— y la documentación.
 
 Teclas F ocupadas por el juego: `f1` (saltar tutorial), `f3` (overlay de depuración),
-`f9` (playground), `f11` (pantalla completa). Con F8 y F7 tomadas por los mods, quedan
-libres F2, F4, F5, F6, F10 y F12 — evita F10 y F12, que algunos gestores de ventanas
+`f9` (playground), `f11` (pantalla completa). Con F6, F7 y F8 tomadas por los mods,
+quedan libres F2, F4, F5, F10 y F12 — evita F10 y F12, que algunos gestores de ventanas
 capturan antes de que lleguen al juego.
 
 Decisiones deliberadas que el README explica: **no** tocar `src/online.lua` (los puntajes
-se siguen enviando al Supabase compartido), y **no** sumar a `self.stats.gold` desde el
-mod de oro (para que la pantalla final y las misiones no mientan sobre lo ganado
-jugando). Efecto conocido y documentado, no resuelto: al *retirarse*, el juego convierte
-el saldo sobrante en puntos de mejora permanentes (1 por cada 1000, tope 50), así que F7
-infla esa conversión.
+se siguen enviando al Supabase compartido, también los de partidas con el modo letal),
+**no** sumar a `self.stats.gold` desde el mod de oro, y **no** inflar el daño en el modo
+letal (ver la trampa de abajo). Efecto conocido y documentado, no resuelto: al
+*retirarse*, el juego convierte el saldo sobrante en puntos de mejora permanentes (1 por
+cada 1000, tope 50), así que F7 infla esa conversión.
 
-Sin probar: arrancar el juego en Linux y pulsar F8 o F7 (el contenedor no tiene OpenGL ni
-pantalla). Sin cubrir: Windows, donde la build de LÖVE va *fusionada* (el ZIP anexado al
-`.exe`) y haría falta una tercera rama que extraiga y re-anexe el payload.
+Sin probar: ver el modo letal en el juego con ventana (la píldora y los efectos), y
+arrancar el juego en Linux (el contenedor no tiene OpenGL ni pantalla). Sin cubrir:
+Windows, donde la build de LÖVE va *fusionada* (el ZIP anexado al `.exe`) y haría falta
+una tercera rama que extraiga y re-anexe el payload.
 
 El README.md es el documento de diseño: explica el *por qué* de cada decisión con más
 detalle que este archivo.
